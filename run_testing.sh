@@ -1,22 +1,48 @@
-#!/bin/bash
+#!/usr/bin/env bash
+#SBATCH --job-name=mosq-test
+#SBATCH --time=02:00:00
+#SBATCH --open-mode=truncate
+#SBATCH --output=test-output.log
+#SBATCH --error=test-error.log
+#SBATCH --gres=gpu:1
+#SBATCH --mem=32G
+#
+# Evaluate RF-DETR on the test split (see test_mosquito_model.py).
+#
+# Usage
+#   Local (executable):
+#     chmod +x run_testing.sh
+#     ./run_testing.sh
+#     ./run_testing.sh --weights output/checkpoint_best_total.pth --worst-overlap 10 --best-overlap 10
+#
+#   Slurm:
+#     cd /path/to/Mosquitoes && sbatch run_testing.sh
+#     # Slurm runs the batch script from a spool dir; SCRIPT_DIR uses SLURM_SUBMIT_DIR
+#     # (the cwd where you ran sbatch), not the copied script path.
+#     # From elsewhere: sbatch --chdir=/path/to/Mosquitoes /path/to/Mosquitoes/run_testing.sh
+#     # Extra CLI args: sbatch --wrap 'cd /path/to/Mosquitoes && ./run_testing.sh --max-images 200'
+#
+# Environment (optional)
+#   CONDA_BASE  Miniconda/Mambaforge root (must contain etc/profile.d/conda.sh)
+#   CONDA_ENV   Environment name (default: Mosquitoes_env)
+#
+# If Slurm jobs do not inherit your shell env, uncomment and set:
+#   export CONDA_BASE=/path/to/miniconda3
 
-# ======== SLURM Job Configuration ========
-#SBATCH --job-name=mosq-test              # Name of the job in the queue
-#SBATCH --time=02:00:00                   # Wall time limit (evaluation is usually shorter than training)
-#SBATCH --open-mode=truncate                # Append to output and error logs
-#SBATCH --output=test-output.log          # Standard output log
-#SBATCH --error=test-error.log            # Standard error log
-#SBATCH --gres=gpu:1                      # GPU for RF-DETR inference
-#SBATCH --mem=32G                         # Raise if you still see OOM kills (oom_kill in sacct)
+set -euo pipefail
 
-# ======== Job Execution Steps ========
+# Under sbatch the script often runs from /var/spool/slurmd/...; dirname(BASH_SOURCE) is wrong then.
+if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
+  SCRIPT_DIR="${SLURM_SUBMIT_DIR}"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+cd "${SCRIPT_DIR}"
 
-cd /data/jjia496/Mosquitoes
+if [[ -n "${CONDA_BASE:-}" ]]; then
+  # shellcheck source=/dev/null
+  source "${CONDA_BASE}/etc/profile.d/conda.sh"
+  conda activate "${CONDA_ENV:-Mosquitoes_env}"
+fi
 
-source /data/jjia496/miniconda3/bin/activate Mosquitoes_env
-
-# Optional args (also works with sbatch run_testing.sh -- … on many sites):
-#   --weights output/checkpoint_best_total.pth
-#   --max-side 1280          # shrink large frames before inference (fewer GPU OOMs)
-#   --max-images 500         # quick subset
-python3 test_mosquito_model.py "$@"
+exec python3 "${SCRIPT_DIR}/test_mosquito_model.py" "$@"
