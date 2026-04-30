@@ -25,6 +25,7 @@
 # Environment (optional)
 #   CONDA_BASE  Miniconda/Mambaforge root (must contain etc/profile.d/conda.sh)
 #   CONDA_ENV   Environment name (default: Mosquitoes_env)
+#   PYTHON_BIN  Python executable override (default: python3)
 #
 # If Slurm jobs do not inherit your shell env, uncomment and set:
 #   export CONDA_BASE=/path/to/miniconda3
@@ -39,10 +40,23 @@ else
 fi
 cd "${SCRIPT_DIR}"
 
+# Fallback for this cluster account if CONDA_BASE is not exported.
+if [[ -z "${CONDA_BASE:-}" && -d "/data/jjia496/miniconda3" ]]; then
+  CONDA_BASE="/data/jjia496/miniconda3"
+fi
+
 if [[ -n "${CONDA_BASE:-}" ]]; then
   # shellcheck source=/dev/null
   source "${CONDA_BASE}/etc/profile.d/conda.sh"
   conda activate "${CONDA_ENV:-Mosquitoes_env}"
 fi
 
-exec python3 "${SCRIPT_DIR}/test_mosquito_model.py" "$@"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+if ! "${PYTHON_BIN}" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+  echo "ERROR: ${PYTHON_BIN} is too old. test_mosquito_model.py requires Python >= 3.10." >&2
+  echo "Set CONDA_BASE/CONDA_ENV (or PYTHON_BIN) so sbatch uses your newer environment." >&2
+  "${PYTHON_BIN}" -V >&2 || true
+  exit 1
+fi
+
+exec "${PYTHON_BIN}" "${SCRIPT_DIR}/test_mosquito_model.py" "$@"
