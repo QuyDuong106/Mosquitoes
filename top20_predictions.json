@@ -1,0 +1,247 @@
+[
+  {
+    "image_path": "rfdetr_dataset/test/train_00158.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          1110.377685546875,
+          1894.3441162109375,
+          1776.837646484375,
+          2526.417724609375
+        ],
+        "score": 0.914823055267334,
+        "class_id": 0
+      }
+    ]
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_00434.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          408.35662841796875,
+          337.87860107421875,
+          698.5079345703125,
+          651.252685546875
+        ],
+        "score": 0.9313356280326843,
+        "class_id": 0
+      }
+    ]
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_00757.jpeg",
+    "detections": []
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_01200.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          362.97698974609375,
+          928.9308471679688,
+          1830.071044921875,
+          2432.472900390625
+        ],
+        "score": 0.9387034773826599,
+        "class_id": 0
+      }
+    ]
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_02705.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          236.253662109375,
+          410.0067138671875,
+          632.2066040039062,
+          1127.987060546875
+        ],
+        "score": 0.9282298684120178,
+        "class_id": 0
+      }
+    ]
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_04136.jpeg",
+    "detections": []
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_04425.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          602.071533203125,
+          1295.4923095703125,
+          2649.25927734375,
+          2995.396728515625
+        ],
+        "score": 0.8997706174850464,
+        "class_id": 0
+      }
+    ]
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_04462.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          374.92889404296875,
+          617.9639892578125,
+          700.0730590820312,
+          870.9835815429688
+        ],
+        "score": 0.9272605180740356,
+        "class_id": 0
+      }
+    ]
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_05168.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          240.52699279785156,
+          170.9950408935547,
+          654.1129150390625,
+          666.4539794921875
+        ],
+        "score": 0.918799102306366,
+        "class_id": 0
+      }
+    ]
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_05363.jpeg",
+    "detections": []
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_05413.jpeg",
+    "detections": []
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_06939.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          239.19342041015625,
+          354.46734619140625,
+          510.2130432128906,
+          635.2757568359375
+        ],
+        "score": 0.8967969417572021,
+        "class_id": 0
+      }
+    ]
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_07018.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          687.6123046875,
+          470.7549743652344,
+          982.5504150390625,
+          836.899658203125
+        ],
+        "score": 0.9070771932601929,
+        "class_id": 0
+      }
+    ]
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_07454.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          1401.2979736328125,
+          2026.3994140625,
+          1757.252685546875,
+          2413.24951171875
+        ],
+        "score": 0.8690699934959412,
+        "class_id": 0
+      }
+    ]
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_07478.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          1600.1248779296875,
+          1916.8155517578125,
+          1894.7398681640625,
+          2241.403564453125
+        ],
+        "score": 0.6657662391662598,
+        "class_id": 0
+      }
+    ]
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_07811.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          201.96942138671875,
+          893.6402587890625,
+          425.9207763671875,
+          1130.7984619140625
+        ],
+        "score": 0.7574597001075745,
+        "class_id": 0
+      }
+    ]
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_08090.jpeg",
+    "detections": []
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_08201.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          516.0609741210938,
+          755.05029296875,
+          662.6869506835938,
+          919.13330078125
+        ],
+        "score": 0.8843193054199219,
+        "class_id": 0
+      }
+    ]
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_08494.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          945.50830078125,
+          1473.964599609375,
+          2090.8173828125,
+          3260.0244140625
+        ],
+        "score": 0.9306338429450989,
+        "class_id": 0
+      }
+    ]
+  },
+  {
+    "image_path": "rfdetr_dataset/test/train_09316.jpeg",
+    "detections": [
+      {
+        "xyxy": [
+          1412.3516845703125,
+          578.2680053710938,
+          2367.66162109375,
+          1404.14404296875
+        ],
+        "score": 0.6590284109115601,
+        "class_id": 0
+      }
+    ]
+  }
+]
