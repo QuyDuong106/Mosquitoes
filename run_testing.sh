@@ -22,6 +22,10 @@
 #     # From elsewhere: sbatch --chdir=/path/to/Mosquitoes /path/to/Mosquitoes/run_testing.sh
 #     # Extra CLI args: sbatch --wrap 'cd /path/to/Mosquitoes && ./run_testing.sh --max-images 200'
 #
+# Under Slurm, predictions JSON is written to ${SLURM_SUBMIT_DIR}/test_predictions.json by
+# default (sbatch submit directory). Pass --save-predictions /other/path.json to override
+# (your path wins because it is passed last).
+#
 # Environment (optional)
 #   CONDA_BASE  Miniconda/Mambaforge root (must contain etc/profile.d/conda.sh)
 #   CONDA_ENV   Environment name (default: Mosquitoes_env)
@@ -59,4 +63,10 @@ if ! "${PYTHON_BIN}" -c 'import sys; raise SystemExit(0 if sys.version_info >= (
   exit 1
 fi
 
-exec "${PYTHON_BIN}" "${SCRIPT_DIR}/test_mosquito_model.py" "$@"
+# Slurm: pin predictions output to submit directory (same as post-cd cwd).
+SLURM_PRED_ARGS=()
+if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
+  SLURM_PRED_ARGS=(--save-predictions "${SLURM_SUBMIT_DIR}/test_predictions.json")
+fi
+
+exec "${PYTHON_BIN}" "${SCRIPT_DIR}/test_mosquito_model.py" "${SLURM_PRED_ARGS[@]}" "$@"
