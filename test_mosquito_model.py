@@ -10,6 +10,7 @@ Usage:
   python3 test_mosquito_model.py --weights output/checkpoint_best_total.pth --max-images 200
   python3 test_mosquito_model.py --weights ... --max-side 1280   # lower GPU memory on big images
   python3 test_mosquito_model.py --weights ... --worst-overlap 0 --best-overlap 20   # only top 20 by overlap
+  python3 test_mosquito_model.py --weights ... --save-predictions test_predictions.json
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import argparse
 import gc
 import glob
 import itertools
+import json
 import os
 import sys
 
@@ -118,6 +120,13 @@ def parse_args() -> argparse.Namespace:
         default=0.5,
         help="IoU threshold for per-image precision/recall/F1 and micro-averaged accuracy "
         "(default 0.5, aligned with mAP@50).",
+    )
+    p.add_argument(
+        "--save-predictions",
+        default=None,
+        metavar="PATH",
+        help="After evaluation, write per-image predicted boxes (xyxy), scores, and class_ids "
+        "to this JSON file (UTF-8).",
     )
     return p.parse_args()
 
@@ -286,6 +295,39 @@ def _print_overlap_rank_lines(entries: list[dict[str, object]]) -> None:
         print(f"      {r['path']}")
 
 
+def serialise_predictions(
+    image_paths: list[str], predictions: list[sv.Detections]
+) -> list[dict[str, object]]:
+    """One entry per image: path plus list of {xyxy, score, class_id} (native JSON types)."""
+    out: list[dict[str, object]] = []
+    for path, pred in zip(image_paths, predictions, strict=True):
+        pr_xy = _xyxy_array(pred)
+        n = len(pr_xy)
+        conf = pred.confidence
+        cid = pred.class_id
+        dets: list[dict[str, object]] = []
+        for j in range(n):
+            score_val: float | None
+            if conf is not None and j < len(conf):
+                score_val = float(conf[j])
+            else:
+                score_val = None
+            class_val: int | None
+            if cid is not None and j < len(cid):
+                class_val = int(cid[j])
+            else:
+                class_val = None
+            dets.append(
+                {
+                    "xyxy": [float(pr_xy[j, 0]), float(pr_xy[j, 1]), float(pr_xy[j, 2]), float(pr_xy[j, 3])],
+                    "score": score_val,
+                    "class_id": class_val,
+                }
+            )
+        out.append({"image_path": path, "detections": dets})
+    return out
+
+
 def main() -> None:
     args = parse_args()
     ann_path = os.path.join(args.test_dir, "_annotations.coco.json")
@@ -332,12 +374,14 @@ def main() -> None:
 
     predictions: list[sv.Detections] = []
     targets: list[sv.Detections] = []
+    image_paths: list[str] = []
     overlap_rows: list[dict[str, object]] = []
     sample_for_viz: tuple[np.ndarray, sv.Detections] | None = None
 
     with torch.inference_mode():
         for i, sample in enumerate(iterator, start=1):
             _path, image, target = sample
+            image_paths.append(str(_path))
             infer_img, scale_up = maybe_resize_image(np.asarray(image), args.max_side)
             pred = model.predict(infer_img, threshold=args.threshold)
             if not isinstance(pred, sv.Detections):
@@ -410,6 +454,15 @@ def main() -> None:
     )
     print(f"  TP={sum_tp}  FP={sum_fp}  FN={sum_fn}")
     print(f"  micro precision: {mic_p:.4f}  micro recall: {mic_r:.4f}  micro F1: {mic_f1:.4f}")
+
+    if args.save_predictions:
+        parent = os.path.dirname(os.path.abspath(args.save_predictions))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        payload = serialise_predictions(image_paths, predictions)
+        with open(args.save_predictions, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        print(f"Saved predictions ({len(payload)} images) to {args.save_predictions}")
 
     rankable = _rankable_overlap_rows(overlap_rows)
 
