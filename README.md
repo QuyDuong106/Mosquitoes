@@ -1,14 +1,14 @@
 # Mosquito species classification (COMPSCI 760)
 
-This repository includes coursework and tooling around **mosquito imagery**. The narrative below matches the team’s main classification experiment in [`compsci760.ipynb`](compsci760.ipynb).
+This repository includes coursework and tooling around **mosquito imagery**.
+
+**Research question:** How effectively can deep learning models classify mosquito species from noisy, real-world images?
 
 ## Purpose of the study
 
 Public-health and ecological monitoring often need to know **which mosquito species** are present in an area, because species differ in disease vector potential, habitat, and control options. Manual identification from field photos is slow and requires expertise.
 
-This notebook addresses **automated species recognition from photographs**: given a labeled image dataset, we build a **multi-class image classifier** that predicts one of several mosquito species from the full image. The goal is to explore **deep learning with imbalanced classes and the noisy environment** (some species are much rarer than others) and to report **standard classification metrics** so performance can be compared across models and splits.
-
-This is **image-level classification** (one label per image), not object detection (Detection + classification is done in the other branch): training uses whole images resized to a fixed input size, with labels derived from the annotation table per filename.
+This project addresses **automated species recognition from photographs**: given a labeled image dataset, we build detection and classification models that support mosquito species prediction from real-world images. The goal is to explore **deep learning with imbalanced classes and noisy image conditions** so performance can be compared across model families and pipeline designs.
 
 ## Dataset (as used in the notebook)
 
@@ -20,25 +20,62 @@ This is **image-level classification** (one label per image), not object detecti
 
 - **Scale:** on the order of **~10k unique images** in the captured run, with **six species** (example class names in the notebook: *aegypti*, *albopictus*, *anopheles*, *culex*, *culiseta*, *japonicus-koreicus*). Counts are **highly imbalanced** (a few dominant classes and long-tailed rare classes).
 
-## Modeling approach (summary)
+This project is designed with 3 experiment testing phases.
+
+## Experiment design
+
+### Experiment A: Detection
+
+This experiment uses the RF-DETR model to detect mosquitoes inside images. It contributes the first layer of the two-stage detection and classification pipeline by localizing mosquito regions before species classification.
+
+To run the RF-DETR experiment, use the detection branch and follow the training/testing script in that branch:
+
+```bash
+git checkout detection/rf-detr-small-training-testing
+```
+
+The detection workflow trains RF-DETR on bounding-box annotations, evaluates predicted boxes, and exports detection outputs that can be passed into the downstream classification stage.
+
+### Experiment B: Fine-grained classification
+
+This experiment compares CNN-based and vision transformer approaches for mosquito species classification. The CNN candidates are EfficientNet-B0, ResNet50, and MobileNetV2. The vision transformer candidates are DeiT and ViT.
+
+The classification experiments are run in Kaggle Notebook or Jupyter Notebook. To address class imbalance, we combine loss-management strategies and sampling methods, including:
+
+- `weighted_sampler`
+- `weighted_loss`
+- `pf_loss`
+- `stratified_sampling`
+- combinations of the above methods
+
+We apply hierarchical training to avoid a greedy full search over every model and method combination. First, candidate models and imbalance-handling combinations are trained for 5 epochs. We then examine gradient convergence behavior and validation results, select the top 3 candidates, and retrain them for more epochs with an early-stopping process.
+
+### Experiment C: End-to-end vs two-stage comparison
+
+This experiment compares labels predicted by end-to-end classification models with fine-grained classification outputs from the two-stage pipeline. The goal is to evaluate whether explicit mosquito detection before classification improves species recognition under noisy real-world image conditions.
+
+## Preprocessing
 
 - **Split:** stratified train / validation / test (e.g. 70% / 15% / 15% with a fixed `random_state` for reproducibility).
-- **Class imbalance:** inverse-frequency **class weights** mapped to per-sample weights and a **`WeightedRandomSampler`** on the training loader so minority classes are seen more often during training.
-- **Architecture:** **EfficientNet-B0** with ImageNet-1k pretrained weights; the **feature backbone is frozen** and only the **classification head** is replaced and trained for six classes.
-- **Training:** cross-entropy loss, Adam with a small learning rate, multiple epochs with checkpointing and best-model selection based on validation performance (see notebook for exact schedule and logging).
 - **Input pipeline:** resize to 224×224, ImageNet normalization; light **data augmentation** on the training set (flips, small rotation, color jitter).
-- **Evaluation:** accuracy, precision/recall/F1 (including macro views where applicable), **confusion matrix**, and **one-vs-rest ROC / ROC-AUC** for multi-class discrimination.
+- **Class imbalance:** imbalance-handling methods include weighted sampling, weighted loss, stratified sampling, and probability-fairness style losses so minority classes are represented more reliably during training.
+- **Training:** models use pretrained backbones where applicable, small learning rates, checkpointing, and best-model selection based on validation performance.
 
-This notebook also defines a **small per-class subset** of the splits (capped samples per class) for quicker experiments; the default training cells use the **full** train/val/test data loaders unless you switch the commented lines.
+## Evaluation
 
-## How to run
-
-- Open **`compsci760.ipynb`** in Jupyter or run it on **Kaggle** after attaching the same dataset bundle and aligning paths (`dataset_dir`, `image_dir`, `annotation_path`).
-- Requires **Python ≥ 3.10**-style usage in spirit (the notebook was executed with recent PyTorch/CUDA where available).
+- **Detection:** IoU and mAP are used to evaluate bounding-box localization and detection quality.
+- **Classification:** macro-F1 is the primary metric because the dataset is class-imbalanced; balanced accuracy is the secondary metric to measure per-class recall fairness.
 
 ## Related code in this repo
 
-Other scripts (e.g. `train_mosquito_model.py`, `test_mosquito_model.py`, `convert_to_coco.py`) target **object detection / COCO-style** workflows for mosquitoes and are **not** the same task as the six-way species classifier in the notebook; they can complement a pipeline (e.g. detect then crop then classify) but are maintained as separate tracks unless you wire them together explicitly.
+The repository follows a naming convention based on `type-of-experiment/type-of-function`. For example, detection work is organized under detection-focused branches and files, while fine-grained classification work is organized under classification-focused branches and files. This keeps object detection, baseline classification, imbalance handling, data preparation, and comparison experiments separated while still supporting the full two-stage pipeline.
+
+## Team contributions
+
+- Sophia
+- Youmin
+- Jinghao
+- Duong
 
 ---
 
