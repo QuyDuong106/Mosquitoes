@@ -14,6 +14,10 @@ This is **image-level classification** (one label per image), not object detecti
 
 - **Source layout (Kaggle):** images under `images/images`, labels in `labels/annotations.csv` (see the `dataset_dir` path inside the notebook; adjust if you run locally).
 - **Annotations:** CSV columns include image filename, image dimensions, bounding-box coordinates (`bbx_*`), and `class_label`. For modeling, the notebook collapses to **one row per image** by taking the **modal** `class_label` when multiple rows exist for the same file.
+- **Manual labeling process:** before modeling, we performed sanity checks on the manual annotations and clarified ambiguous bounding-box labels. This included reviewing whether boxes correctly enclosed the mosquito, checking label consistency across repeated annotations, and cleaning unclear cases so the image-level species labels used for classification were more reliable.
+
+![Before and after manual bounding-box label clarification for train_06958](docs/images/train_06958_before_after.png)
+
 - **Scale:** on the order of **~10k unique images** in the captured run, with **six species** (example class names in the notebook: *aegypti*, *albopictus*, *anopheles*, *culex*, *culiseta*, *japonicus-koreicus*). Counts are **highly imbalanced** (a few dominant classes and long-tailed rare classes).
 
 ## Modeling approach (summary)
