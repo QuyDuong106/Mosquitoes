@@ -1,82 +1,257 @@
-# Mosquito species classification (COMPSCI 760)
+# Mosquitoes — RF-DETR and YOLO training
 
-This repository includes coursework and tooling around **mosquito imagery**.
+Train **RF-DETR Small** or **Ultralytics YOLO** on the [Kaggle mosquitoes dataset](https://www.kaggle.com/datasets/duongnguyenquy/mosquitoes-compsci760) (`duongnguyenquy/mosquitoes-compsci760`).
 
-**Research question:** How effectively can deep learning models classify mosquito species from noisy, real-world images?
-
-## Purpose of the study
-
-Public-health and ecological monitoring often need to know **which mosquito species** are present in an area, because species differ in disease vector potential, habitat, and control options. Manual identification from field photos is slow and requires expertise.
-
-This project addresses **automated species recognition from photographs**: given a labeled image dataset, we build detection and classification models that support mosquito species prediction from real-world images. The goal is to explore **deep learning with imbalanced classes and noisy image conditions** so performance can be compared across model families and pipeline designs.
-
-## Dataset (as used in the notebook)
-
-- **Source layout (Kaggle):** images under `images/images`, labels in `labels/annotations.csv` (see the `dataset_dir` path inside the notebook; adjust if you run locally).
-- **Annotations:** CSV columns include image filename, image dimensions, bounding-box coordinates (`bbx_*`), and `class_label`. For modeling, the notebook collapses to **one row per image** by taking the **modal** `class_label` when multiple rows exist for the same file.
-- **Manual labeling process:** before modeling, we performed sanity checks on the manual annotations and clarified ambiguous bounding-box labels. This included reviewing whether boxes correctly enclosed the mosquito, checking label consistency across repeated annotations, and cleaning unclear cases so the image-level species labels used for classification were more reliable.
-
-![Before and after manual bounding-box label clarification for train_06958](docs/images/train_06958_before_after.png)
-
-- **Scale:** on the order of **~10k unique images** in the captured run, with **six species** (example class names in the notebook: *aegypti*, *albopictus*, *anopheles*, *culex*, *culiseta*, *japonicus-koreicus*). Counts are **highly imbalanced** (a few dominant classes and long-tailed rare classes).
-
-This project is designed with 3 experiment testing phases.
-
-## Experiment design
-
-### Experiment A: Detection
-
-This experiment uses the RF-DETR model to detect mosquitoes inside images. It contributes the first layer of the two-stage detection and classification pipeline by localizing mosquito regions before species classification.
-
-To run the RF-DETR experiment, use the detection branch and follow the training/testing script in that branch:
-
-```bash
-git checkout detection/rf-detr-small-training-testing
-```
-
-The detection workflow trains RF-DETR on bounding-box annotations, evaluates predicted boxes, and exports detection outputs that can be passed into the downstream classification stage.
-
-### Experiment B: Fine-grained classification
-
-This experiment compares CNN-based and vision transformer approaches for mosquito species classification. The CNN candidates are EfficientNet-B0, ResNet50, and MobileNetV2. The vision transformer candidates are DeiT and ViT.
-
-The classification experiments are run in Kaggle Notebook or Jupyter Notebook. To address class imbalance, we combine loss-management strategies and sampling methods, including:
-
-- `weighted_sampler`
-- `weighted_loss`
-- `pf_loss`
-- `stratified_sampling`
-- combinations of the above methods
-
-We apply hierarchical training to avoid a greedy full search over every model and method combination. First, candidate models and imbalance-handling combinations are trained for 5 epochs. We then examine gradient convergence behavior and validation results, select the top 3 candidates, and retrain them for more epochs with an early-stopping process.
-
-### Experiment C: End-to-end vs two-stage comparison
-
-This experiment compares labels predicted by end-to-end classification models with fine-grained classification outputs from the two-stage pipeline. The goal is to evaluate whether explicit mosquito detection before classification improves species recognition under noisy real-world image conditions.
-
-## Preprocessing
-
-- **Split:** stratified train / validation / test (e.g. 70% / 15% / 15% with a fixed `random_state` for reproducibility).
-- **Input pipeline:** resize to 224×224, ImageNet normalization; light **data augmentation** on the training set (flips, small rotation, color jitter).
-- **Class imbalance:** imbalance-handling methods include weighted sampling, weighted loss, stratified sampling, and probability-fairness style losses so minority classes are represented more reliably during training.
-- **Training:** models use pretrained backbones where applicable, small learning rates, checkpointing, and best-model selection based on validation performance.
-
-## Evaluation
-
-- **Detection:** IoU and mAP are used to evaluate bounding-box localization and detection quality.
-- **Classification:** macro-F1 is the primary metric because the dataset is class-imbalanced; balanced accuracy is the secondary metric to measure per-class recall fairness.
-
-## Related code in this repo
-
-The repository follows a naming convention based on `type-of-experiment/type-of-function`. For example, detection work is organized under detection-focused branches and files, while fine-grained classification work is organized under classification-focused branches and files. This keeps object detection, baseline classification, imbalance handling, data preparation, and comparison experiments separated while still supporting the full two-stage pipeline.
-
-## Team contributions
-
-- Sophia
-- Youmin
-- Jinghao
-- Duong
+Both pipelines share the same label splits from `manual_labels.csv` (70 / 15 / 15 by image, seed 42).
 
 ---
 
-*If you reuse this README, update dataset paths, author list, and institutional wording to match your course submission.*
+## Project structure
+
+```
+mosquitoes-keep/
+├── scripts/                        # All runnable code
+│   ├── convert_to_coco.py          # Shared: CSV → COCO JSON splits
+│   ├── dataset_images.py           # Shared: image path resolution
+│   │
+│   ├── train_rfdetr_model.py       # RF-DETR: full train pipeline
+│   ├── test_rfdetr_model.py        # RF-DETR: test-split evaluation
+│   ├── run_rfdetr_conversion.sh    # SLURM: COCO conversion only
+│   ├── run_rfdetr_training.sh      # SLURM: convert + train
+│   ├── run_rfdetr_testing.sh       # SLURM: evaluate checkpoints
+│   │
+│   ├── convert_to_yolo.py          # YOLO: COCO → yolo_dataset/
+│   ├── train_yolo_model.py         # YOLO: full train pipeline
+│   ├── test_yolo_model.py          # YOLO: test-split evaluation
+│   ├── run_yolo_training.sh        # SLURM: convert + train
+│   └── run_yolo_testing.sh         # SLURM: evaluate checkpoints
+│
+├── logs/                           # SLURM stdout / stderr
+│   ├── rfdetr-train-output.log
+│   ├── rfdetr-test-error.log
+│   ├── yolo-train-output.log
+│   └── …
+│
+├── manual_labels.csv               # Canonical train/val/test splits
+├── requirements.txt                # Project Python dependencies
+├── .gitignore
+└── README.md
+```
+
+**Run all commands from the repo root.** Python scripts write outputs (`rfdetr_dataset/`, `output/`, `yolo_dataset/`, `runs/`) relative to the current working directory. SLURM wrappers `cd` to the repo root automatically.
+
+### Generated at runtime (repo root)
+
+| Path | Created by |
+|------|------------|
+| `<dataset>/labels/train_coco.json` etc. | `convert_to_coco.py` |
+| `rfdetr_dataset/` | `train_rfdetr_model.py` |
+| `output/` | RF-DETR training checkpoints |
+| `yolo_dataset/` | `convert_to_yolo.py` / `train_yolo_model.py` |
+| `runs/mosquito/yolo_train/` | YOLO training |
+| `final_test_prediction.jpg` | RF-DETR training (sample inference) |
+| `test_predictions.json` | RF-DETR testing (under SLURM submit dir) |
+
+---
+
+## Setup
+
+**Python ≥ 3.10** and a **GPU** are recommended for training and evaluation.
+
+```bash
+cd /path/to/mosquitoes-keep
+pip install -r requirements.txt          # RF-DETR + YOLO, or install selectively:
+pip install rfdetr supervision torch kagglehub pandas pillow numpy   # RF-DETR
+pip install ultralytics                  # YOLO (in addition to above)
+```
+
+### Dataset access
+
+Provide the dataset in one of two ways:
+
+1. **Local copy (recommended on HPC)** — point at the unpacked Kaggle dataset root (the folder that contains images, not `labels/` itself):
+
+   ```bash
+   export MOSQUITOES_DATASET=/path/to/mosquitoes-compsci760
+   ```
+
+2. **Kaggle Hub download** — set a token and let `kagglehub` fetch or use the cache:
+
+   ```bash
+   export KAGGLE_API_TOKEN="your_token_here"
+   ```
+
+Do not commit API tokens. For SLURM, use `sbatch --export=ALL` or a local `.env.slurm` file (gitignored).
+
+### Label CSV resolution
+
+`convert_to_coco.py` looks for `manual_labels.csv` in this order:
+
+1. `MOSQUITOES_LABELS_CSV` environment variable
+2. `./manual_labels.csv` (repo root)
+3. `<dataset_root>/labels/manual_labels.csv`
+
+---
+
+## Data pipeline
+
+Both model pipelines start from the same conversion step:
+
+```
+manual_labels.csv  →  train/val/test COCO JSON  →  model-specific dataset layout
+                              ↓
+                    RF-DETR: rfdetr_dataset/
+                    YOLO:    yolo_dataset/ + data.yaml
+```
+
+**Shared conversion** (run once, or let the train scripts regenerate it):
+
+```bash
+python3 scripts/convert_to_coco.py
+python3 scripts/convert_to_coco.py --dataset /path/to/mosquitoes-compsci760
+```
+
+Writes `train_coco.json`, `val_coco.json`, and `test_coco.json` under `<dataset>/labels/`.
+
+---
+
+## RF-DETR
+
+Uses `RFDETRSmall` from the [`rfdetr`](https://github.com/roboflow/rf-detr) package. Training defaults to **early stopping on validation mAP** (patience 10, min delta 0.001).
+
+### Local
+
+```bash
+cd /path/to/mosquitoes-keep
+export MOSQUITOES_DATASET=/path/to/dataset_root   # or KAGGLE_API_TOKEN
+
+# Train (convert → build rfdetr_dataset/ → train → sample inference)
+python3 scripts/train_rfdetr_model.py
+python3 scripts/train_rfdetr_model.py --epochs 80 --early-stopping-patience 15
+python3 scripts/train_rfdetr_model.py --no-early-stopping
+
+# Evaluate on test split
+python3 scripts/test_rfdetr_model.py --weights output/checkpoint_best_total.pth
+python3 scripts/test_rfdetr_model.py --max-images 200 --max-side 1280
+python3 scripts/test_rfdetr_model.py --save-predictions test_predictions.json
+```
+
+### SLURM
+
+Submit from the repo root so logs and outputs land in the right place:
+
+```bash
+cd /path/to/mosquitoes-keep
+export MOSQUITOES_DATASET=/path/to/dataset_root
+export CONDA_BASE=/path/to/miniconda3
+
+sbatch --export=ALL scripts/run_rfdetr_conversion.sh   # COCO only (CPU)
+sbatch --export=ALL scripts/run_rfdetr_training.sh     # full pipeline (GPU)
+sbatch --export=ALL scripts/run_rfdetr_testing.sh    # evaluation (GPU)
+```
+
+| Script | SLURM job | Logs |
+|--------|-----------|------|
+| `run_rfdetr_conversion.sh` | `mosq-rfdetr-convert` | `logs/rfdetr-convert-*.log` |
+| `run_rfdetr_training.sh` | `mosq-rfdetr` | `logs/rfdetr-train-*.log` |
+| `run_rfdetr_testing.sh` | `mosq-rfdetr-test` | `logs/rfdetr-test-*.log` |
+
+Extra CLI args are forwarded to the Python script:
+
+```bash
+sbatch --export=ALL scripts/run_rfdetr_training.sh -- --dataset /scratch/you/data --epochs 80
+```
+
+---
+
+## YOLO (Ultralytics)
+
+Same COCO splits as RF-DETR; exports `yolo_dataset/` with symlinks, YOLO `.txt` labels, and `data.yaml`.
+
+### Local
+
+```bash
+cd /path/to/mosquitoes-keep
+export MOSQUITOES_DATASET=/path/to/dataset_root
+
+# Train (convert → build yolo_dataset/ → YOLO.train)
+python3 scripts/train_yolo_model.py
+python3 scripts/train_yolo_model.py --model yolo11n.pt --epochs 80 --patience 15
+
+# YOLO export only
+python3 scripts/convert_to_yolo.py --dataset /path/to/dataset_root
+
+# Evaluate
+python3 scripts/test_yolo_model.py --weights runs/mosquito/yolo_train/weights/best.pt
+```
+
+### SLURM
+
+```bash
+sbatch --export=ALL scripts/run_yolo_training.sh
+sbatch --export=ALL scripts/run_yolo_testing.sh
+```
+
+| Script | SLURM job | Logs |
+|--------|-----------|------|
+| `run_yolo_training.sh` | `mosq-yolo` | `logs/yolo-train-*.log` |
+| `run_yolo_testing.sh` | `mosq-yolo-test` | `logs/yolo-test-*.log` |
+
+Default checkpoints: `runs/mosquito/yolo_train/weights/best.pt`.
+
+---
+
+## Environment variables
+
+| Variable | Used by | Purpose |
+|----------|---------|---------|
+| `MOSQUITOES_DATASET` | All train/convert scripts | Path to dataset root (images) |
+| `MOSQUITOES_LABELS_CSV` | `convert_to_coco.py` | Override path to `manual_labels.csv` |
+| `KAGGLE_API_TOKEN` | `convert_to_coco.py` | Download dataset via Kaggle Hub |
+| `CONDA_BASE` | SLURM scripts | Miniconda root (activates `CONDA_ENV`) |
+| `CONDA_ENV` | SLURM scripts | Conda env name (default: `Mosquitoes_env`) |
+| `PYTHON_BIN` | SLURM scripts | Python executable (default: `python3`) |
+
+Optional `.env.slurm` at the repo root is sourced by the RF-DETR SLURM scripts:
+
+```bash
+export MOSQUITOES_DATASET=/path/to/dataset_root
+export KAGGLE_API_TOKEN=...   # only if needed
+```
+
+---
+
+## HPC tips
+
+**Disk quota** — if home is full, Matplotlib and PyTorch may warn or fall back to `/tmp`:
+
+```bash
+export MPLCONFIGDIR=/path/to/scratch/mplconfig
+export XDG_CACHE_HOME=/path/to/scratch/cache
+```
+
+**SLURM env inheritance** — login-shell exports are not passed to batch jobs by default. Use `sbatch --export=ALL` or `.env.slurm`.
+
+**Logs directory** — SLURM writes to `logs/` relative to the submit directory. The folder must exist before submitting (it is included in this repo).
+
+---
+
+## Script reference
+
+| Script | Pipeline | Description |
+|--------|----------|-------------|
+| `convert_to_coco.py` | Shared | Build COCO JSON splits from `manual_labels.csv` |
+| `dataset_images.py` | Shared | Image index / path resolution (imported by others) |
+| `train_rfdetr_model.py` | RF-DETR | Convert + build `rfdetr_dataset/` + train |
+| `test_rfdetr_model.py` | RF-DETR | Test-split mAP (supervision metrics) |
+| `convert_to_yolo.py` | YOLO | COCO → `yolo_dataset/` |
+| `train_yolo_model.py` | YOLO | Convert + export + `YOLO.train()` |
+| `test_yolo_model.py` | YOLO | Test-split mAP via `model.val(split="test")` |
+
+To switch RF-DETR model size, change the import and constructor in `train_rfdetr_model.py` and `test_rfdetr_model.py`. For YOLO, pass `--model yolo11n.pt`, `yolo11s.pt`, etc.
+
+---
+
+## License and data
+
+Model code depends on **rf-detr**, **supervision**, and **ultralytics** — each governed by its own license. Mosquito images and labels come from the [Kaggle dataset](https://www.kaggle.com/datasets/duongnguyenquy/mosquitoes-compsci760); use according to its terms on Kaggle.
