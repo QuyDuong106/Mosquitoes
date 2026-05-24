@@ -1,19 +1,12 @@
-# Mosquitoes — Python dependencies
+# Mosquitoes — RF-DETR Python dependencies
 # Python >= 3.10 required.
 #
 # Install PyTorch for your platform first if the lines below are not enough:
 #   https://pytorch.org/get-started/locally/
 #
-# Full install (RF-DETR + YOLO):
 #   pip install -r requirements.txt
-#
-# RF-DETR only:
-#   pip install kagglehub pandas pillow numpy supervision rfdetr torch torchvision
-#
-# YOLO only (also needs shared conversion deps):
-#   pip install kagglehub pandas ultralytics
 
-# --- Shared (dataset conversion) ---
+# --- Dataset conversion ---
 kagglehub>=1.0.0
 pandas>=2.0
 Pillow>=10.0
@@ -24,6 +17,3 @@ supervision>=0.27
 rfdetr>=1.6
 torch>=2.0
 torchvision>=0.15
-
-# --- YOLO pipeline ---
-ultralytics>=8.3
