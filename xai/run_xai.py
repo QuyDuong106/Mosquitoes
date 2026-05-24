@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
-Create a stratified split from cropped_annotations.csv and run image-classification
-xAI on sampled crop images using Integrated Gradients and SmoothGrad.
+Run image-classification xAI with Integrated Gradients and SmoothGrad.
+
+By default, this script:
+1. Reads cropped_annotations.csv.
+2. Creates a stratified train/validation/test split by class_label.
+3. Samples crop images from the test split.
+4. Runs Integrated Gradients and SmoothGrad for each sampled image.
+
+Use --image-path to explain one specific image instead of sampling from the split.
 """
 
 from __future__ import annotations
@@ -28,15 +35,16 @@ DEFAULT_CHECKPOINT = (
     DEFAULT_REPO
     / "results on new labels/final results - top methods from phase1&2 ver/weighted_loss_winverse_lr0.0005.pth"
 )
-DEFAULT_OUT_DIR = DEFAULT_REPO / "xai_outputs/stratified_crop_xai"
+DEFAULT_OUT_DIR = DEFAULT_REPO / "xai_outputs"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run stratified crop-image xAI with IG and SmoothGrad.")
+    parser = argparse.ArgumentParser(description="Run Integrated Gradients and SmoothGrad for the best classifier.")
     parser.add_argument("--csv-path", type=Path, default=DEFAULT_CSV)
     parser.add_argument("--image-dir", type=Path, default=DEFAULT_IMAGE_DIR)
     parser.add_argument("--checkpoint-path", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
+    parser.add_argument("--image-path", type=Path, default=None, help="Optional single image to explain.")
     parser.add_argument("--test-size", type=float, default=0.15)
     parser.add_argument("--val-size", type=float, default=0.15)
     parser.add_argument("--seed", type=int, default=42)
@@ -54,12 +62,15 @@ def get_device() -> torch.device:
     return torch.device("cpu")
 
 
-def load_split(csv_path: Path, image_dir: Path, test_size: float, val_size: float, seed: int):
+def load_annotations(csv_path: Path, image_dir: Path) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
     df = df.drop_duplicates("img_fName").copy()
     df["image_path"] = df["img_fName"].apply(lambda name: image_dir / str(name))
     df = df[df["image_path"].apply(lambda path: path.exists())].reset_index(drop=True)
+    return df
 
+
+def load_split(df: pd.DataFrame, test_size: float, val_size: float, seed: int):
     train_df, temp_df = train_test_split(
         df,
         test_size=test_size + val_size,
@@ -84,6 +95,19 @@ def sample_xai_images(test_df: pd.DataFrame, samples_per_class: int, seed: int) 
         .apply(lambda group: group.sample(n=min(samples_per_class, len(group)), random_state=seed))
         .reset_index(drop=True)
     )
+
+
+def single_image_df(df: pd.DataFrame, image_path: Path) -> pd.DataFrame:
+    image_path = image_path.resolve()
+    matches = df[df["image_path"].apply(lambda path: Path(path).resolve() == image_path)]
+
+    if matches.empty:
+        raise ValueError(
+            f"Image not found in annotations: {image_path}\n"
+            "Make sure --image-path points to a file listed in cropped_annotations.csv."
+        )
+
+    return matches.head(1).reset_index(drop=True)
 
 
 def build_model(num_classes: int) -> nn.Module:
@@ -114,7 +138,11 @@ def load_checkpoint(model: nn.Module, checkpoint_path: Path, device: torch.devic
     else:
         state_dict = checkpoint
 
-    model.load_state_dict(clean_state_dict(state_dict), strict=False)
+    missing, unexpected = model.load_state_dict(clean_state_dict(state_dict), strict=False)
+    if missing:
+        print("Missing keys:", missing)
+    if unexpected:
+        print("Unexpected keys:", unexpected)
 
 
 def normalize_map(attr_map: np.ndarray) -> np.ndarray:
@@ -135,9 +163,24 @@ def save_rgb(path: Path, image_rgb: np.ndarray) -> None:
     cv2.imwrite(str(path), cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
 
 
+def pad_to_height(img: np.ndarray, height: int) -> np.ndarray:
+    if img.shape[0] == height:
+        return img
+    pad = height - img.shape[0]
+    return np.pad(img, ((0, pad), (0, 0), (0, 0)), constant_values=255)
+
+
 def make_panel(original: Image.Image, ig_rgb: np.ndarray, smoothgrad_rgb: np.ndarray) -> np.ndarray:
     original_rgb = np.array(original.convert("RGB"))
-    return np.concatenate([original_rgb, ig_rgb, smoothgrad_rgb], axis=1)
+    height = max(original_rgb.shape[0], ig_rgb.shape[0], smoothgrad_rgb.shape[0])
+    return np.concatenate(
+        [
+            pad_to_height(original_rgb, height),
+            pad_to_height(ig_rgb, height),
+            pad_to_height(smoothgrad_rgb, height),
+        ],
+        axis=1,
+    )
 
 
 def explain_image(
@@ -223,23 +266,27 @@ def main() -> None:
             "\"results on new labels/final results - top methods from phase1&2 ver/weighted_loss_winverse_lr0.0005.pth\""
         )
 
-    train_df, val_df, test_df = load_split(
-        csv_path=args.csv_path,
-        image_dir=args.image_dir,
-        test_size=args.test_size,
-        val_size=args.val_size,
-        seed=args.seed,
-    )
+    df = load_annotations(args.csv_path, args.image_dir)
+    class_names = sorted(df["class_label"].astype(str).unique())
 
-    class_names = sorted(train_df["class_label"].astype(str).unique())
-    sample_df = sample_xai_images(test_df, args.samples_per_class, args.seed)
+    if args.image_path is None:
+        train_df, val_df, test_df = load_split(df, args.test_size, args.val_size, args.seed)
+        sample_df = sample_xai_images(test_df, args.samples_per_class, args.seed)
 
-    split_dir = args.out_dir / "splits"
-    split_dir.mkdir(parents=True, exist_ok=True)
-    train_df.to_csv(split_dir / "train_split.csv", index=False)
-    val_df.to_csv(split_dir / "val_split.csv", index=False)
-    test_df.to_csv(split_dir / "test_split.csv", index=False)
-    sample_df.to_csv(split_dir / "xai_sample_images.csv", index=False)
+        split_dir = args.out_dir / "splits"
+        split_dir.mkdir(parents=True, exist_ok=True)
+        train_df.to_csv(split_dir / "train_split.csv", index=False)
+        val_df.to_csv(split_dir / "val_split.csv", index=False)
+        test_df.to_csv(split_dir / "test_split.csv", index=False)
+        sample_df.to_csv(split_dir / "xai_sample_images.csv", index=False)
+
+        print("Train images:", len(train_df))
+        print("Val images:", len(val_df))
+        print("Test images:", len(test_df))
+        print("xAI images:", len(sample_df))
+    else:
+        sample_df = single_image_df(df, args.image_path)
+        print("xAI images:", len(sample_df))
 
     device = get_device()
     model = build_model(num_classes=len(class_names))
@@ -274,10 +321,6 @@ def main() -> None:
     summary = pd.DataFrame(rows)
     summary.to_csv(args.out_dir / "xai_summary.csv", index=False)
 
-    print("Train images:", len(train_df))
-    print("Val images:", len(val_df))
-    print("Test images:", len(test_df))
-    print("xAI images:", len(sample_df))
     print("Saved xAI outputs to:", args.out_dir)
     print(summary[["img_fName", "true_class", "pred_class", "pred_prob", "correct", "panel_path"]])
 
