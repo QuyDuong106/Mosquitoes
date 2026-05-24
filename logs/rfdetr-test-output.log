@@ -10,6 +10,7 @@ Test metrics (supervision / COCO-style mAP):
 Detection accuracy @IoU≥0.5 (greedy match, pooled over 1554 images):
   TP=1489  FP=40  FN=87
   micro precision: 0.9738  micro recall: 0.9448  micro F1: 0.9591
+  macro precision: 0.4370  macro recall: 0.3200  macro F1: 0.3223
 Saved predictions (1554 images) to /data/jjia496/Mosquitoes/test_predictions.json
 
 Lowest pred-vs-GT overlap (10 images): mean of (max IoU to any prediction) per ground-truth box — lower is worse localization vs labels. P/R/F1 use IoU≥0.5 greedy matching.
