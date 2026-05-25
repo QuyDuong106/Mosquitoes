@@ -1,0 +1,13 @@
+# Mosquitoes — YOLO Python dependencies
+# Python >= 3.10 required.
+#
+#   pip install -r requirements.txt
+
+# --- Dataset conversion ---
+kagglehub>=1.0.0
+pandas>=2.0
+Pillow>=10.0
+
+# --- YOLO pipeline ---
+numpy>=1.24
+ultralytics>=8.3
