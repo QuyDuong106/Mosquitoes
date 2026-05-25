@@ -2,12 +2,13 @@
 #SBATCH --job-name=mosq-rfdetr
 #SBATCH --time=06:00:00
 #SBATCH --open-mode=truncate
-#SBATCH --output=logs/rfdetr-train-output.log
-#SBATCH --error=logs/rfdetr-train-error.log
+#SBATCH --output=logs/rfdetr-end-to-end-train-output.log
+#SBATCH --error=logs/rfdetr-end-to-end-train-error.log
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #
-# Full pipeline: COCO split → rfdetr_dataset/ → train RFDETRSmall (see train_rfdetr_model.py).
+# End-to-end (multi-class): COCO split → rfdetr_dataset/ → train RFDETRSmall (see train_rfdetr_model.py).
+# Logs: logs/rfdetr-end-to-end-train-{output,error}.log
 #
 # Default training behavior (passed explicitly below; extra args from sbatch go last and override):
 #   --epochs 50

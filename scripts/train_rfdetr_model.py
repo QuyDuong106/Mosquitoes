@@ -3,15 +3,32 @@ import inspect
 import os
 import json
 import shutil
+import sys
 from PIL import Image
 import supervision as sv
 from rfdetr import RFDETRSmall
-from convert_to_coco import convert_and_split_csv
+from convert_to_coco import (
+    RFDETR_DATASET_DIR,
+    RFDETR_DATASET_DIR_DET,
+    RFDETR_OUTPUT_DIR,
+    RFDETR_OUTPUT_DIR_DET,
+    coco_split_json_names,
+    convert_and_split_csv,
+    resolve_dataset_layout,
+)
 from dataset_images import build_image_index, resolve_image_path
 
-def create_roboflow_structure(source_dataset_path):
+def create_roboflow_structure(
+    source_dataset_path,
+    *,
+    labels_dir: str | None = None,
+    target_dir: str | None = None,
+    detection_only: bool = False,
+):
     """Tricks RF-DETR by building the exact folder structure it demands using absolute symlinks."""
-    target_dir = os.path.join(os.getcwd(), "rfdetr_dataset")
+    if target_dir is None:
+        target_dir = RFDETR_DATASET_DIR_DET if detection_only else RFDETR_DATASET_DIR
+    target_dir = os.path.abspath(target_dir)
     
     # Wipe the old directory to clear out broken shortcuts
     if os.path.exists(target_dir):
@@ -22,13 +39,16 @@ def create_roboflow_structure(source_dataset_path):
     os.makedirs(target_dir, exist_ok=True)
     
     # RF-DETR expects 'valid' for the validation set
+    json_names = coco_split_json_names(detection_only)
     splits = {
-        "train": "train_coco.json",
-        "valid": "val_coco.json", 
-        "test": "test_coco.json"
+        "train": json_names["train"],
+        "valid": json_names["val"],
+        "test": json_names["test"],
     }
     
-    source_labels_dir = os.path.abspath(os.path.join(source_dataset_path, "labels"))
+    source_labels_dir = os.path.abspath(
+        labels_dir or os.path.join(source_dataset_path, "labels")
+    )
     available_files = build_image_index(source_dataset_path)
     if not available_files:
         raise RuntimeError(f"No image files found under dataset path: {source_dataset_path}")
@@ -140,25 +160,87 @@ def main():
         action="store_true",
         help="If set, early stopping compares the EMA weights' validation mAP.",
     )
+    parser.add_argument(
+        "--detection-only",
+        action="store_true",
+        help="Train single-class detector from the same manual_labels.csv and train/val/test "
+        "images as multi-class (writes *_coco_det.json, rfdetr_dataset_det/, output_det/). "
+        "Does not overwrite multi-class COCO splits or output/ checkpoints.",
+    )
+    parser.add_argument(
+        "--rf-dataset-dir",
+        metavar="DIR",
+        default=None,
+        help="RF-DETR symlink dataset directory (default: rfdetr_dataset or rfdetr_dataset_det).",
+    )
+    parser.add_argument(
+        "--output-dir",
+        metavar="DIR",
+        default=None,
+        help="Checkpoint directory for model.train() (default: output or output_det).",
+    )
+    parser.add_argument(
+        "--skip-dataset-export",
+        action="store_true",
+        help="Skip COCO conversion and rfdetr_dataset(_det)/ rebuild; use existing export "
+        "(run export_rfdetr_detection_dataset.py first for detection-only).",
+    )
     args = parser.parse_args()
     dataset_arg = os.path.abspath(os.path.expanduser(args.dataset)) if args.dataset else None
 
     # ---------------------------------------------------------
     # 1. FORMAT THE DATASET (and download only if no root was given)
     # ---------------------------------------------------------
-    if dataset_arg:
-        print(f"Using dataset root from --dataset: {dataset_arg}")
-    elif os.environ.get("MOSQUITOES_DATASET", "").strip():
-        print("Using dataset root from MOSQUITOES_DATASET.")
+    default_rf_dir = RFDETR_DATASET_DIR_DET if args.detection_only else RFDETR_DATASET_DIR
+    if args.skip_dataset_export:
+        image_root, labels_dir = resolve_dataset_layout(dataset_arg)
+        source_dataset_path = image_root
+        rf_dataset_dir = os.path.abspath(args.rf_dataset_dir or default_rf_dir)
+        train_json = coco_split_json_names(args.detection_only)["train"]
+        train_coco_path = os.path.join(labels_dir, train_json)
+        if not os.path.isfile(train_coco_path):
+            sys.exit(
+                f"Missing {train_coco_path}. Run export_rfdetr_detection_dataset.py first "
+                "or drop --skip-dataset-export."
+            )
+        if not os.path.isdir(rf_dataset_dir):
+            sys.exit(
+                f"Missing {rf_dataset_dir}. Run export_rfdetr_detection_dataset.py first "
+                "or drop --skip-dataset-export."
+            )
+        print(f"Using existing dataset export: {rf_dataset_dir}")
     else:
-        print("No --dataset / MOSQUITOES_DATASET; fetching from Kaggle cache via kagglehub…")
+        if dataset_arg:
+            print(f"Using dataset root from --dataset: {dataset_arg}")
+        elif os.environ.get("MOSQUITOES_DATASET", "").strip():
+            print("Using dataset root from MOSQUITOES_DATASET.")
+        else:
+            print("No --dataset / MOSQUITOES_DATASET; fetching from Kaggle cache via kagglehub…")
 
-    source_dataset_path = convert_and_split_csv(dataset_arg)
-    
-    # Build the required folder structure locally
-    rf_dataset_dir = create_roboflow_structure(source_dataset_path)
+        source_dataset_path = convert_and_split_csv(
+            dataset_arg, detection_only=args.detection_only
+        )
+        _, labels_dir = resolve_dataset_layout(dataset_arg)
 
-    train_coco_path = os.path.join(source_dataset_path, "labels", "train_coco.json")
+        rf_dataset_dir = create_roboflow_structure(
+            source_dataset_path,
+            labels_dir=labels_dir,
+            target_dir=args.rf_dataset_dir,
+            detection_only=args.detection_only,
+        )
+        train_json = coco_split_json_names(args.detection_only)["train"]
+        train_coco_path = os.path.join(labels_dir, train_json)
+
+    output_dir = os.path.abspath(
+        args.output_dir
+        or (RFDETR_OUTPUT_DIR_DET if args.detection_only else RFDETR_OUTPUT_DIR)
+    )
+    if args.detection_only:
+        print(
+            f"Detection-only run: dataset={rf_dataset_dir}, checkpoints={output_dir} "
+            "(multi-class output/ and train_coco.json are left unchanged)."
+        )
+
     with open(train_coco_path, "r", encoding="utf-8") as f:
         train_coco_meta = json.load(f)
     num_classes = len(train_coco_meta.get("categories", [{"id": 0}]))
@@ -182,6 +264,7 @@ def main():
         "dataset_dir": rf_dataset_dir,
         "epochs": args.epochs,
         "lr": 1e-4,
+        "output_dir": output_dir,
     }
     if args.early_stopping:
         train_kw.update(
@@ -253,7 +336,11 @@ def main():
         
         print(f"Found {len(detections)} mosquitoes in the image!")
         
-        save_path = "final_test_prediction.jpg"
+        save_path = (
+            "final_test_prediction_det.jpg"
+            if args.detection_only
+            else "final_test_prediction.jpg"
+        )
         annotated_image.save(save_path)
         print(f"Saved visualization to {save_path}.")
 

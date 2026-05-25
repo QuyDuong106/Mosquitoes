@@ -8,9 +8,9 @@ and `_annotations.coco.json`, e.g. `./rfdetr_dataset/test` after
 Usage:
   python3 scripts/test_rfdetr_model.py --weights output/checkpoint_best_total.pth
   python3 scripts/test_rfdetr_model.py --weights output/checkpoint_best_total.pth --max-images 200
-  python3 scripts/test_rfdetr_model.py --weights ... --max-side 1280   # lower GPU memory on big images
-  python3 scripts/test_rfdetr_model.py --weights ... --worst-overlap 0 --best-overlap 20   # only top 20 by overlap
-  python3 scripts/test_rfdetr_model.py --weights ... --save-predictions test_predictions.json
+  python3 test_mosquito_model.py --weights ... --max-side 1280   # lower GPU memory on big images
+  python3 test_mosquito_model.py --weights ... --worst-overlap 0 --best-overlap 20   # only top 20 by overlap
+  python3 test_rfdetr_model.py --weights ... --save-predictions test_predictions-end-to-end.json
 """
 
 from __future__ import annotations
@@ -36,19 +36,33 @@ except ImportError:
     except ImportError:  # older supervision
         MeanAveragePrecision = sv.MeanAveragePrecision  # type: ignore[misc,assignment]
 
+from detection_metrics import (
+    greedy_match_tp_fp_fn,
+    init_class_counts,
+    mean_max_iou_per_gt,
+    max_pairwise_iou_predictions,
+    merge_class_counts,
+    per_class_tp_fp_fn,
+    precision_recall_f1,
+    print_overlap_rank_lines,
+    print_pooled_accuracy,
+    rankable_overlap_rows,
+)
+from convert_to_coco import RFDETR_DATASET_DIR, RFDETR_DATASET_DIR_DET, RFDETR_OUTPUT_DIR, RFDETR_OUTPUT_DIR_DET
 from rfdetr import RFDETRSmall
 
 
-def default_weights_path() -> str | None:
+def default_weights_path(*, detection_only: bool = False) -> str | None:
+    output_dir = RFDETR_OUTPUT_DIR_DET if detection_only else RFDETR_OUTPUT_DIR
     patterns = [
-        os.path.join("output", "checkpoint_best_total.pth"),
-        os.path.join("output", "checkpoint_best_ema.pth"),
-        os.path.join("output", "checkpoint.pth"),
+        os.path.join(output_dir, "checkpoint_best_total.pth"),
+        os.path.join(output_dir, "checkpoint_best_ema.pth"),
+        os.path.join(output_dir, "checkpoint.pth"),
     ]
     for p in patterns:
         if os.path.isfile(p):
             return p
-    matches = sorted(glob.glob(os.path.join("output", "checkpoint*.pth")))
+    matches = sorted(glob.glob(os.path.join(output_dir, "checkpoint*.pth")))
     return matches[-1] if matches else None
 
 
@@ -56,8 +70,14 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Evaluate RF-DETR on test COCO split.")
     p.add_argument(
         "--test-dir",
-        default=os.path.join("rfdetr_dataset", "test"),
-        help="Directory with test images and _annotations.coco.json",
+        default=None,
+        help="Directory with test images and _annotations.coco.json "
+        "(default: rfdetr_dataset/test or rfdetr_dataset_det/test with --detection-only)",
+    )
+    p.add_argument(
+        "--detection-only",
+        action="store_true",
+        help="Use rfdetr_dataset_det/test and output_det/ checkpoints from detection-only training.",
     )
     p.add_argument(
         "--weights",
@@ -118,7 +138,7 @@ def parse_args() -> argparse.Namespace:
         "--match-iou",
         type=float,
         default=0.5,
-        help="IoU threshold for per-image precision/recall/F1 and micro-averaged accuracy "
+        help="IoU threshold for per-image precision/recall/F1 and pooled micro/macro accuracy "
         "(default 0.5, aligned with mAP@50).",
     )
     p.add_argument(
@@ -179,120 +199,10 @@ def _xyxy_array(det: sv.Detections) -> np.ndarray:
     return np.asarray(det.xyxy, dtype=np.float64)
 
 
-def iou_xyxy_matrix(boxes_a: np.ndarray, boxes_b: np.ndarray) -> np.ndarray:
-    """Pairwise IoU, shape (len(a), len(b)). Either side may be length 0."""
-    na, nb = len(boxes_a), len(boxes_b)
-    if na == 0 or nb == 0:
-        return np.zeros((na, nb), dtype=np.float64)
-    ax1, ay1, ax2, ay2 = boxes_a[:, 0:1], boxes_a[:, 1:2], boxes_a[:, 2:3], boxes_a[:, 3:4]
-    bx1, by1, bx2, by2 = boxes_b.T
-    bx1, bx2 = bx1.reshape(1, -1), bx2.reshape(1, -1)
-    by1, by2 = by1.reshape(1, -1), by2.reshape(1, -1)
-    inter_x1 = np.maximum(ax1, bx1)
-    inter_y1 = np.maximum(ay1, by1)
-    inter_x2 = np.minimum(ax2, bx2)
-    inter_y2 = np.minimum(ay2, by2)
-    iw = np.clip(inter_x2 - inter_x1, 0.0, None)
-    ih = np.clip(inter_y2 - inter_y1, 0.0, None)
-    inter = iw * ih
-    area_a = np.clip(ax2 - ax1, 0.0, None) * np.clip(ay2 - ay1, 0.0, None)
-    area_b = np.clip(bx2 - bx1, 0.0, None) * np.clip(by2 - by1, 0.0, None)
-    union = area_a + area_b - inter + 1e-9
-    return inter / union
-
-
-def mean_max_iou_per_gt(gt_xyxy: np.ndarray, pred_xyxy: np.ndarray) -> float:
-    """
-    For each ground-truth box, take the best IoU to any prediction, then average.
-    Low values mean predictions overlap the labeled mosquitoes poorly (worst localization).
-    """
-    if len(gt_xyxy) == 0:
-        return float("nan")
-    ious = iou_xyxy_matrix(pred_xyxy, gt_xyxy)  # (n_pred, n_gt)
-    if ious.size == 0:
-        return 0.0
-    max_per_gt = np.max(ious, axis=0)
-    return float(np.mean(max_per_gt))
-
-
-def max_pairwise_iou_predictions(pred_xyxy: np.ndarray) -> float:
-    """Largest IoU between two distinct predicted boxes (duplicate / crowded detections)."""
-    n = len(pred_xyxy)
-    if n < 2:
-        return 0.0
-    ious = iou_xyxy_matrix(pred_xyxy, pred_xyxy)
-    np.fill_diagonal(ious, 0.0)
-    return float(np.max(ious))
-
-
-def greedy_match_tp_fp_fn(
-    pred_xyxy: np.ndarray,
-    gt_xyxy: np.ndarray,
-    iou_threshold: float,
-) -> tuple[int, int, int]:
-    """
-    Greedy one-to-one matching by descending IoU (same spirit as VOC/COCO @50).
-    Returns (tp, fp, fn).
-    """
-    n_p, n_g = len(pred_xyxy), len(gt_xyxy)
-    if n_g == 0:
-        return 0, n_p, 0
-    if n_p == 0:
-        return 0, 0, n_g
-    ious = iou_xyxy_matrix(pred_xyxy, gt_xyxy)
-    pairs: list[tuple[float, int, int]] = []
-    for pi in range(n_p):
-        for gi in range(n_g):
-            pairs.append((float(ious[pi, gi]), pi, gi))
-    pairs.sort(key=lambda t: t[0], reverse=True)
-    matched_p: set[int] = set()
-    matched_g: set[int] = set()
-    tp = 0
-    for iou, pi, gi in pairs:
-        if iou < iou_threshold:
-            break
-        if pi in matched_p or gi in matched_g:
-            continue
-        matched_p.add(pi)
-        matched_g.add(gi)
-        tp += 1
-    fp = n_p - tp
-    fn = n_g - tp
-    return tp, fp, fn
-
-
-def precision_recall_f1(tp: int, fp: int, fn: int) -> tuple[float, float, float]:
-    """Per-image or pooled counts → precision, recall, F1 in [0, 1]."""
-    denom_p = tp + fp
-    denom_r = tp + fn
-    prec = float(tp / denom_p) if denom_p > 0 else (1.0 if tp + fp + fn == 0 else 0.0)
-    rec = float(tp / denom_r) if denom_r > 0 else 1.0
-    if prec + rec <= 0:
-        f1 = 0.0
-    else:
-        f1 = 2.0 * prec * rec / (prec + rec)
-    return prec, rec, f1
-
-
-def _rankable_overlap_rows(
-    overlap_rows: list[dict[str, object]],
-) -> list[dict[str, object]]:
-    return [
-        r
-        for r in overlap_rows
-        if int(r["n_gt"]) > 0 and np.isfinite(float(r["mean_max_iou_gt"]))
-    ]
-
-
-def _print_overlap_rank_lines(entries: list[dict[str, object]]) -> None:
-    for rank, r in enumerate(entries, start=1):
-        print(
-            f"  {rank:2d}. overlap_mean_max_iou={float(r['mean_max_iou_gt']):.4f}  "
-            f"P={float(r['precision']):.3f} R={float(r['recall']):.3f} F1={float(r['f1']):.3f}  "
-            f"TP/FP/FN={r['tp']}/{r['fp']}/{r['fn']}  "
-            f"n_gt={r['n_gt']} n_pred={r['n_pred']}  max_pred_pair_iou={float(r['max_pred_pair_iou']):.4f}"
-        )
-        print(f"      {r['path']}")
+def _class_id_array(det: sv.Detections) -> np.ndarray:
+    if det.class_id is None or len(det.class_id) == 0:
+        return np.zeros(0, dtype=int)
+    return np.asarray(det.class_id, dtype=int)
 
 
 def serialise_predictions(
@@ -349,23 +259,28 @@ def num_classes_and_category_names_from_coco(ann_path: str) -> tuple[int, dict[i
 
 def main() -> None:
     args = parse_args()
-    ann_path = os.path.join(args.test_dir, "_annotations.coco.json")
-    if not os.path.isdir(args.test_dir):
-        sys.exit(f"Test directory not found: {args.test_dir}")
+    rf_root = RFDETR_DATASET_DIR_DET if args.detection_only else RFDETR_DATASET_DIR
+    test_dir = args.test_dir or os.path.join(rf_root, "test")
+    ann_path = os.path.join(test_dir, "_annotations.coco.json")
+    if not os.path.isdir(test_dir):
+        sys.exit(f"Test directory not found: {test_dir}")
     if not os.path.isfile(ann_path):
         sys.exit(
-            f"Missing {ann_path}. Build rfdetr_dataset first (run training setup) "
+            f"Missing {ann_path}. Build {rf_root} first (run training setup) "
             "or point --test-dir to your test folder."
         )
 
-    weights = args.weights or default_weights_path()
+    weights = args.weights or default_weights_path(detection_only=args.detection_only)
     if not weights or not os.path.isfile(weights):
+        out_hint = RFDETR_OUTPUT_DIR_DET if args.detection_only else RFDETR_OUTPUT_DIR
         sys.exit(
             "No checkpoint found. Pass --weights path/to.pth "
-            "(e.g. output/checkpoint_best_total.pth)."
+            f"(e.g. {out_hint}/checkpoint_best_total.pth)."
         )
 
     num_classes, category_names = num_classes_and_category_names_from_coco(ann_path)
+    class_ids = sorted(category_names.keys())
+    class_counts = init_class_counts(class_ids)
     print(f"Inference head: num_classes={num_classes} (from COCO categories).")
 
     optimize = not args.no_optimize
@@ -374,10 +289,10 @@ def main() -> None:
     if args.max_side:
         print(f"Inference resize: max side {args.max_side}px (boxes scaled back for mAP)")
 
-    print(f"Loading COCO test data from: {args.test_dir}")
+    print(f"Loading COCO test data from: {test_dir}")
     try:
         dataset = sv.DetectionDataset.from_coco(
-            images_directory_path=args.test_dir,
+            images_directory_path=test_dir,
             annotations_path=ann_path,
         )
     except AttributeError:
@@ -415,7 +330,15 @@ def main() -> None:
             targets.append(target)
             gt_xy = _xyxy_array(target)
             pr_xy = _xyxy_array(pred)
+            gt_cls = _class_id_array(target)
+            pr_cls = _class_id_array(pred)
             tp, fp, fn = greedy_match_tp_fp_fn(pr_xy, gt_xy, args.match_iou)
+            merge_class_counts(
+                class_counts,
+                per_class_tp_fp_fn(
+                    pr_xy, pr_cls, gt_xy, gt_cls, args.match_iou, class_ids
+                ),
+            )
             prec, rec, f1 = precision_recall_f1(tp, fp, fn)
             overlap_rows.append(
                 {
@@ -469,13 +392,15 @@ def main() -> None:
     sum_tp = sum(int(r["tp"]) for r in overlap_rows)
     sum_fp = sum(int(r["fp"]) for r in overlap_rows)
     sum_fn = sum(int(r["fn"]) for r in overlap_rows)
-    mic_p, mic_r, mic_f1 = precision_recall_f1(sum_tp, sum_fp, sum_fn)
-    print()
-    print(
-        f"Detection accuracy @IoU≥{args.match_iou:g} (greedy match, pooled over {n} images):"
+    print_pooled_accuracy(
+        n_images=n,
+        match_iou=args.match_iou,
+        sum_tp=sum_tp,
+        sum_fp=sum_fp,
+        sum_fn=sum_fn,
+        class_counts=class_counts,
+        class_ids=class_ids,
     )
-    print(f"  TP={sum_tp}  FP={sum_fp}  FN={sum_fn}")
-    print(f"  micro precision: {mic_p:.4f}  micro recall: {mic_r:.4f}  micro F1: {mic_f1:.4f}")
 
     if args.save_predictions:
         parent = os.path.dirname(os.path.abspath(args.save_predictions))
@@ -488,7 +413,7 @@ def main() -> None:
             json.dump(payload, f, indent=2)
         print(f"Saved predictions ({len(payload)} images) to {args.save_predictions}")
 
-    rankable = _rankable_overlap_rows(overlap_rows)
+    rankable = rankable_overlap_rows(overlap_rows)
 
     if args.worst_overlap > 0:
         worst = sorted(rankable, key=lambda r: float(r["mean_max_iou_gt"]))
@@ -499,7 +424,7 @@ def main() -> None:
             "per ground-truth box — lower is worse localization vs labels. "
             f"P/R/F1 use IoU≥{args.match_iou:g} greedy matching."
         )
-        _print_overlap_rank_lines(worst[:k])
+        print_overlap_rank_lines(worst[:k])
 
     if args.best_overlap > 0:
         best = sorted(rankable, key=lambda r: float(r["mean_max_iou_gt"]), reverse=True)
@@ -510,7 +435,7 @@ def main() -> None:
             "higher is closer agreement between boxes and labels. "
             f"P/R/F1 use IoU≥{args.match_iou:g} greedy matching."
         )
-        _print_overlap_rank_lines(best[:k])
+        print_overlap_rank_lines(best[:k])
 
     if args.save_sample and sample_for_viz is not None:
         img, dets = sample_for_viz

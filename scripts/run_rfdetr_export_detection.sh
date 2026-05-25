@@ -1,19 +1,15 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=mosq-rfdetr-convert
+#SBATCH --job-name=mosq-rfdetr-export-det
 #SBATCH --time=00:30:00
 #SBATCH --open-mode=truncate
-#SBATCH --output=logs/rfdetr-end-to-end-convert-output.log
-#SBATCH --error=logs/rfdetr-end-to-end-convert-error.log
+#SBATCH --output=logs/rfdetr-detection-only-export-output.log
+#SBATCH --error=logs/rfdetr-detection-only-export-error.log
 #
-# End-to-end (multi-class), CPU-only: writes train/val/test COCO JSON under <dataset>/labels/.
-# Logs: logs/rfdetr-end-to-end-convert-{output,error}.log
-# (No GPU required; omitting --gres avoids consuming a GPU for this step.)
+# Detection-only, CPU-only: COCO (*_coco_det.json) + rfdetr_dataset_det/
+# Logs: logs/rfdetr-detection-only-export-{output,error}.log
+# Does NOT modify train_coco.json, rfdetr_dataset/, or output/.
 #
-#   cd /path/to/Mosquitoes && sbatch run_rfdetr_conversion.sh
-#   sbatch --export=ALL run_rfdetr_conversion.sh
-#   sbatch run_rfdetr_conversion.sh --dataset /path/to/dataset_root
-#
-# Environment: MOSQUITOES_DATASET and/or KAGGLE_API_TOKEN — same rules as run_rfdetr_training.sh
+#   cd /path/to/mosquitoes-rf-detr && sbatch --export=ALL scripts/run_rfdetr_export_detection.sh
 
 set -euo pipefail
 
@@ -57,10 +53,10 @@ if _has_cli_dataset_arg "$@" || [[ -n "${MOSQUITOES_DATASET:-}" || -n "${KAGGLE_
 else
   cat >&2 <<'EOF'
 ERROR: No dataset configuration visible inside this job.
-See run_rfdetr_training.sh header for MOSQUITOES_DATASET, KAGGLE_API_TOKEN, .env.slurm, or --dataset.
+Set MOSQUITOES_DATASET (kagglehub cache root), MOSQUITOES_DATASET_VERSION=3, or --dataset.
 EOF
   exit 1
 fi
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-exec "${PYTHON_BIN}" "${SCRIPTS_DIR}/convert_to_coco.py" "$@"
+exec "${PYTHON_BIN}" "${SCRIPTS_DIR}/export_rfdetr_detection_dataset.py" "$@"

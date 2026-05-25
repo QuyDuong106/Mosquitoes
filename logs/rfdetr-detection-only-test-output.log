@@ -1,0 +1,58 @@
+Inference head: num_classes=1 (from COCO categories).
+Loading weights: output_det/checkpoint_best_total.pth
+Loading COCO test data from: rfdetr_dataset_det/test
+Evaluated 1554 images (dataset size 1554). Computing mAP…
+Test metrics (supervision / COCO-style mAP):
+  mAP @[.50:.95]: 0.7347
+  mAP @0.50:      0.9685
+  mAP @0.75:      0.8553
+
+Detection accuracy @IoU≥0.5 (greedy match, pooled over 1554 images):
+  TP=1534  FP=28  FN=42
+  micro precision: 0.9821  micro recall: 0.9734  micro F1: 0.9777
+  macro precision: 0.9821  macro recall: 0.9734  macro F1: 0.9777
+Saved predictions (1554 images) to /data/jjia496/Mosquitoes/test_predictions_det.json
+
+Lowest pred-vs-GT overlap (10 images): mean of (max IoU to any prediction) per ground-truth box — lower is worse localization vs labels. P/R/F1 use IoU≥0.5 greedy matching.
+   1. overlap_mean_max_iou=0.0000  P=0.000 R=0.000 F1=0.000  TP/FP/FN=0/0/1  n_gt=1 n_pred=0  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_00243.jpeg
+   2. overlap_mean_max_iou=0.0000  P=0.000 R=0.000 F1=0.000  TP/FP/FN=0/0/1  n_gt=1 n_pred=0  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_01531.jpeg
+   3. overlap_mean_max_iou=0.0000  P=0.000 R=0.000 F1=0.000  TP/FP/FN=0/1/1  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_09316.jpeg
+   4. overlap_mean_max_iou=0.0000  P=0.000 R=0.000 F1=0.000  TP/FP/FN=0/1/1  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_09571.jpeg
+   5. overlap_mean_max_iou=0.0000  P=0.000 R=0.000 F1=0.000  TP/FP/FN=0/1/1  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_10213.jpeg
+   6. overlap_mean_max_iou=0.0002  P=0.000 R=0.000 F1=0.000  TP/FP/FN=0/1/1  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_08742.jpeg
+   7. overlap_mean_max_iou=0.0040  P=0.000 R=0.000 F1=0.000  TP/FP/FN=0/2/1  n_gt=1 n_pred=2  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_09375.jpeg
+   8. overlap_mean_max_iou=0.1451  P=0.000 R=0.000 F1=0.000  TP/FP/FN=0/1/1  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_06916.jpeg
+   9. overlap_mean_max_iou=0.1826  P=1.000 R=0.200 F1=0.333  TP/FP/FN=2/0/8  n_gt=10 n_pred=2  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_07239.jpeg
+  10. overlap_mean_max_iou=0.2025  P=1.000 R=0.286 F1=0.444  TP/FP/FN=2/0/5  n_gt=7 n_pred=2  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_07811.jpeg
+
+Highest pred-vs-GT overlap (10 images): same mean-max-IoU-per-GT score — higher is closer agreement between boxes and labels. P/R/F1 use IoU≥0.5 greedy matching.
+   1. overlap_mean_max_iou=0.9941  P=1.000 R=1.000 F1=1.000  TP/FP/FN=1/0/0  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_05327.jpeg
+   2. overlap_mean_max_iou=0.9869  P=1.000 R=1.000 F1=1.000  TP/FP/FN=1/0/0  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_02369.jpeg
+   3. overlap_mean_max_iou=0.9865  P=1.000 R=1.000 F1=1.000  TP/FP/FN=1/0/0  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_00158.jpeg
+   4. overlap_mean_max_iou=0.9859  P=1.000 R=1.000 F1=1.000  TP/FP/FN=1/0/0  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_00106.jpeg
+   5. overlap_mean_max_iou=0.9857  P=1.000 R=1.000 F1=1.000  TP/FP/FN=1/0/0  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_06226.jpeg
+   6. overlap_mean_max_iou=0.9852  P=1.000 R=1.000 F1=1.000  TP/FP/FN=1/0/0  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_04930.jpeg
+   7. overlap_mean_max_iou=0.9842  P=1.000 R=1.000 F1=1.000  TP/FP/FN=1/0/0  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_02286.jpeg
+   8. overlap_mean_max_iou=0.9824  P=1.000 R=1.000 F1=1.000  TP/FP/FN=1/0/0  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_07953.jpeg
+   9. overlap_mean_max_iou=0.9786  P=1.000 R=1.000 F1=1.000  TP/FP/FN=1/0/0  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_07622.jpeg
+  10. overlap_mean_max_iou=0.9781  P=1.000 R=1.000 F1=1.000  TP/FP/FN=1/0/0  n_gt=1 n_pred=1  max_pred_pair_iou=0.0000
+      rfdetr_dataset_det/test/train_09483.jpeg

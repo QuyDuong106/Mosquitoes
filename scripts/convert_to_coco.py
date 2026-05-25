@@ -6,10 +6,11 @@ import kagglehub
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
-# Server / local runs: point to the folder kagglehub (or your copy) unpacks — the dataset
-# root with images (not the `labels/` folder itself). Labels come from manual_labels.csv.
+# Server / local runs: point at the kagglehub cache root OR a version folder.
 #   export MOSQUITOES_DATASET=/path/to/mosquitoes-compsci760
-# Or: python convert_to_coco.py --dataset /path/to/mosquitoes-compsci760
+#   export MOSQUITOES_DATASET_VERSION=3   # default; images from .../versions/3/
+# COCO JSONs are written under <cache>/labels/ (sibling of versions/).
+# Bounding boxes still come from manual_labels.csv in the repo (or MOSQUITOES_LABELS_CSV).
 #
 # Label CSV resolution (first match wins):
 #   1. MOSQUITOES_LABELS_CSV
@@ -22,9 +23,89 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 MANUAL_LABELS_NAME = "manual_labels.csv"
+KAGGLE_DATASET_HANDLE = "duongnguyenquy/mosquitoes-compsci760"
+DEFAULT_DATASET_VERSION = "3"
 
 
-def resolve_labels_csv(dataset_path: str) -> str:
+def dataset_version() -> str:
+    """Kaggle dataset version folder name (e.g. ``3`` under ``versions/``)."""
+    ver = os.environ.get("MOSQUITOES_DATASET_VERSION", DEFAULT_DATASET_VERSION).strip()
+    return ver or DEFAULT_DATASET_VERSION
+
+
+def kagglehub_dataset_handle(version: str | None = None) -> str:
+    ver = version or dataset_version()
+    return f"{KAGGLE_DATASET_HANDLE}/versions/{ver}"
+
+
+def resolve_image_and_labels_dirs(root: str) -> tuple[str, str]:
+    """
+    Map a user/kagglehub path to (image_root, labels_dir).
+
+    Kaggle Hub cache layout::
+
+        mosquitoes-compsci760/
+          labels/           <- COCO JSON output / optional manual_labels.csv
+          versions/3/       <- images (version 3)
+          versions/11/      <- other versions
+    """
+    root = os.path.abspath(os.path.expanduser(root))
+    versions_parent = os.path.join(root, "versions")
+    if os.path.isdir(versions_parent):
+        ver = dataset_version()
+        image_root = os.path.join(versions_parent, ver)
+        labels_dir = os.path.join(root, "labels")
+        if not os.path.isdir(image_root):
+            available = sorted(
+                name
+                for name in os.listdir(versions_parent)
+                if os.path.isdir(os.path.join(versions_parent, name))
+            )
+            raise FileNotFoundError(
+                f"Dataset version {ver!r} not found under {versions_parent}. "
+                f"Available version folders: {available or '(none)'}. "
+                "Set MOSQUITOES_DATASET_VERSION or MOSQUITOES_DATASET=.../versions/<N>."
+            )
+        return image_root, labels_dir
+
+    parent = os.path.dirname(root)
+    if os.path.basename(parent) == "versions" and os.path.basename(root).isdigit():
+        cache_root = os.path.dirname(parent)
+        labels_at_cache = os.path.join(cache_root, "labels")
+        if os.path.isdir(labels_at_cache):
+            return root, labels_at_cache
+
+    return root, os.path.join(root, "labels")
+
+# Multi-class (species) vs detection-only (single "mosquito" class) use separate COCO files
+# so a detection-only run never overwrites train_coco.json / val_coco.json / test_coco.json.
+COCO_SPLIT_JSON = {
+    False: {
+        "train": "train_coco.json",
+        "val": "val_coco.json",
+        "test": "test_coco.json",
+    },
+    True: {
+        "train": "train_coco_det.json",
+        "val": "val_coco_det.json",
+        "test": "test_coco_det.json",
+    },
+}
+
+RFDETR_DATASET_DIR = "rfdetr_dataset"
+RFDETR_DATASET_DIR_DET = "rfdetr_dataset_det"
+RFDETR_OUTPUT_DIR = "output"
+RFDETR_OUTPUT_DIR_DET = "output_det"
+
+
+def coco_split_json_names(detection_only: bool) -> dict[str, str]:
+    """Return train/val/test COCO basename mapping for the given training mode."""
+    return dict(COCO_SPLIT_JSON[bool(detection_only)])
+
+
+def resolve_labels_csv(
+    dataset_path: str, labels_dir: str | None = None
+) -> str:
     """Return absolute path to manual_labels.csv."""
     env = os.environ.get("MOSQUITOES_LABELS_CSV", "").strip()
     if env:
@@ -33,9 +114,11 @@ def resolve_labels_csv(dataset_path: str) -> str:
             raise FileNotFoundError(f"MOSQUITOES_LABELS_CSV not found: {path}")
         return path
 
+    labels_dir = labels_dir or os.path.join(dataset_path, "labels")
     candidates = [
         os.path.join(REPO_ROOT, MANUAL_LABELS_NAME),
         os.path.join(SCRIPT_DIR, MANUAL_LABELS_NAME),
+        os.path.join(labels_dir, MANUAL_LABELS_NAME),
         os.path.join(dataset_path, "labels", MANUAL_LABELS_NAME),
     ]
     for path in candidates:
@@ -49,13 +132,14 @@ def resolve_labels_csv(dataset_path: str) -> str:
     )
 
 
-def resolve_dataset_root(dataset_path=None):
+def resolve_dataset_layout(dataset_path=None) -> tuple[str, str]:
     """
-    Return absolute dataset root (images tree for training).
+    Return ``(image_root, labels_dir)`` for training/export.
 
     Resolution order when *dataset_path* is None:
-    1. Environment variable ``MOSQUITOES_DATASET``
-    2. ``kagglehub.dataset_download(...)``
+    1. ``MOSQUITOES_DATASET`` (cache root or ``.../versions/<N>``)
+    2. ``kagglehub.dataset_download('.../versions/<N>')`` with ``MOSQUITOES_DATASET_VERSION``
+       (default version ``3``)
     """
     if dataset_path is not None:
         root = os.path.abspath(os.path.expanduser(str(dataset_path)))
@@ -64,35 +148,43 @@ def resolve_dataset_root(dataset_path=None):
             os.path.expanduser(os.environ["MOSQUITOES_DATASET"].strip())
         )
     else:
-        root = os.path.abspath(
-            kagglehub.dataset_download("duongnguyenquy/mosquitoes-compsci760")
-        )
+        handle = kagglehub_dataset_handle()
+        print(f"Resolving dataset via kagglehub: {handle}")
+        root = os.path.abspath(kagglehub.dataset_download(handle))
 
-    if not os.path.isdir(root):
+    image_root, labels_dir = resolve_image_and_labels_dirs(root)
+
+    if not os.path.isdir(image_root):
         hints: list[str] = []
-        root_lower = root.lower()
-        if "path/to" in root_lower or root.rstrip("/").endswith("dataset_root"):
+        root_lower = image_root.lower()
+        if "path/to" in root_lower or image_root.rstrip("/").endswith("dataset_root"):
             hints.append(
-                "This path looks like a README placeholder, not a real folder on disk. "
-                "Set MOSQUITOES_DATASET (or --dataset) to your actual Kaggle dataset root."
+                "This path looks like a README placeholder. "
+                "Set MOSQUITOES_DATASET to your kagglehub cache folder."
             )
-        hints.append(f"The directory does not exist: {root}")
+        hints.append(f"The image directory does not exist: {image_root}")
         if os.path.basename(root.rstrip("/")) == "labels":
             hints.append(
-                "You pointed at the `labels/` folder. Use its parent instead "
-                "(MOSQUITOES_DATASET should be the folder that *contains* `labels/`)."
+                "You pointed at the `labels/` folder. Use the cache root "
+                "(parent of `labels/` and `versions/`) or `.../versions/3`."
             )
         hint_block = "\n\n".join(hints) if hints else ""
         raise FileNotFoundError(
-            f"Dataset root is not a directory:\n  {root}\n\n"
-            "Use the dataset ROOT (directory with images). On a server this is often the path "
-            "from `kagglehub.dataset_download('duongnguyenquy/mosquitoes-compsci760')`.\n\n"
+            f"Dataset image root is not a directory:\n  {image_root}\n\n"
             + (f"Hints:\n{hint_block}\n" if hint_block else "")
         )
 
-    # Ensure manual_labels.csv is reachable before conversion runs.
-    resolve_labels_csv(root)
-    return root
+    os.makedirs(labels_dir, exist_ok=True)
+    resolve_labels_csv(image_root, labels_dir)
+    print(f"Dataset images (version {dataset_version()}): {image_root}")
+    print(f"Dataset labels directory: {labels_dir}")
+    return image_root, labels_dir
+
+
+def resolve_dataset_root(dataset_path=None) -> str:
+    """Return image root only (see :func:`resolve_dataset_layout` for labels path)."""
+    image_root, _ = resolve_dataset_layout(dataset_path)
+    return image_root
 
 def build_image_index(dataset_path):
     """Recursively map lowercased image file names to canonical file names."""
@@ -198,6 +290,144 @@ def report_and_validate_multi_box_labels(df: pd.DataFrame) -> None:
         )
 
 
+def load_manual_labels_dataframe(
+    image_root: str,
+    csv_path: str | None = None,
+    *,
+    labels_dir: str | None = None,
+) -> tuple[pd.DataFrame, str]:
+    """
+    Load and normalize ``manual_labels.csv`` (same pipeline for multi-class and detection-only).
+
+    :return: (dataframe, absolute path to the CSV used)
+    """
+    csv_path = csv_path or resolve_labels_csv(image_root, labels_dir)
+    print(f"Labels source: {csv_path} ({MANUAL_LABELS_NAME})")
+    df = pd.read_csv(csv_path)
+
+    available_files, duplicate_names = build_image_index(image_root)
+    if not available_files:
+        raise RuntimeError(f"No images found under dataset path: {image_root}")
+    if duplicate_names:
+        print(
+            f"Warning: found duplicate image basenames; using first match for {len(duplicate_names)} files."
+        )
+
+    print("Normalizing annotation filenames against available images...")
+    df["resolved_img_fName"] = df["img_fName"].apply(
+        lambda name: resolve_to_available_filename(name, available_files)
+    )
+    missing_rows = int(df["resolved_img_fName"].isna().sum())
+    if missing_rows:
+        print(f"Warning: dropping {missing_rows} annotation rows with missing images.")
+    df = df.dropna(subset=["resolved_img_fName"]).copy()
+    df["img_fName"] = df["resolved_img_fName"]
+    df = df.drop(columns=["resolved_img_fName"])
+    if df.empty:
+        raise RuntimeError("No valid annotation rows remain after filename resolution.")
+
+    if "class_label" in df.columns:
+        n_miss = int(df["class_label"].isna().sum())
+        if n_miss:
+            print(f"Warning: dropping {n_miss} rows with missing class_label.")
+        df = df.dropna(subset=["class_label"]).copy()
+        if df.empty:
+            raise RuntimeError("No rows left after dropping missing class_label.")
+
+    return df, csv_path
+
+
+def image_sets_from_existing_coco(labels_dir: str) -> dict[str, set[str]] | None:
+    """Return train/val/test image file_name sets from multi-class COCO JSONs, or None if missing."""
+    json_names = coco_split_json_names(False)
+    splits: dict[str, set[str]] = {}
+    for split_key in ("train", "val", "test"):
+        path = os.path.join(labels_dir, json_names[split_key])
+        if not os.path.isfile(path):
+            return None
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        splits[split_key] = {str(img["file_name"]) for img in data.get("images", [])}
+    return splits
+
+
+def compute_shuffled_image_splits(unique_images: list[str]) -> tuple[set[str], set[str], set[str]]:
+    """70/15/15 split by image with seed 42 (same logic for both training modes)."""
+    images = list(unique_images)
+    random.seed(42)
+    random.shuffle(images)
+
+    total_imgs = len(images)
+    if total_imgs < 3:
+        raise RuntimeError(
+            f"Need at least 3 valid images to create train/val/test splits, found {total_imgs}."
+        )
+
+    train_split_idx = int(total_imgs * 0.70)
+    val_split_idx = int(total_imgs * 0.85)
+
+    train_split_idx = max(1, min(train_split_idx, total_imgs - 2))
+    val_split_idx = max(train_split_idx + 1, min(val_split_idx, total_imgs - 1))
+
+    train_imgs = set(images[:train_split_idx])
+    val_imgs = set(images[train_split_idx:val_split_idx])
+    test_imgs = set(images[val_split_idx:])
+    return train_imgs, val_imgs, test_imgs
+
+
+def resolve_train_val_test_splits(
+    df: pd.DataFrame,
+    labels_dir: str,
+    *,
+    detection_only: bool,
+) -> tuple[set[str], set[str], set[str]]:
+    """
+    Assign each image to train, val, or test.
+
+    Detection-only: if multi-class ``train_coco.json`` (etc.) already exist, reuse their
+    image assignments so both modes see the exact same images per split. Otherwise use
+    the same seed-42 shuffle as multi-class (identical when ``df`` is the same).
+    """
+    unique_images = df["img_fName"].unique().tolist()
+    all_images = set(unique_images)
+
+    if detection_only:
+        existing = image_sets_from_existing_coco(labels_dir)
+        if existing is not None:
+            train_imgs = existing["train"] & all_images
+            val_imgs = existing["val"] & all_images
+            test_imgs = existing["test"] & all_images
+            covered = train_imgs | val_imgs | test_imgs
+            overlap = (
+                (train_imgs & val_imgs)
+                | (train_imgs & test_imgs)
+                | (val_imgs & test_imgs)
+            )
+            if overlap:
+                print(
+                    f"Warning: overlapping images across multi-class splits ({len(overlap)}); "
+                    "recomputing splits with seed 42."
+                )
+            elif covered != all_images:
+                missing = len(all_images - covered)
+                extra = len(covered - all_images)
+                print(
+                    "Warning: multi-class COCO splits do not cover the current label set "
+                    f"(missing {missing} images, extra {extra}); recomputing splits with seed 42."
+                )
+            else:
+                mc_names = coco_split_json_names(False)
+                print(
+                    "Reusing train/val/test image assignments from existing multi-class COCO "
+                    f"({mc_names['train']}, etc.) — same images and boxes as classification+detection, "
+                    "single class for detection-only export."
+                )
+                return train_imgs, val_imgs, test_imgs
+
+    print("Shuffling and splitting images (by image, not by box; seed 42)...")
+    return compute_shuffled_image_splits(unique_images)
+
+
 def build_coco_dict(df, image_set, categories, label_to_id, use_class_labels: bool):
     """Build a COCO dict for a subset of images (all box rows per image are included)."""
     coco_data = {
@@ -255,87 +485,46 @@ def build_coco_dict(df, image_set, categories, label_to_id, use_class_labels: bo
 
     return coco_data
 
-def convert_and_split_csv(dataset_path=None):
+def convert_and_split_csv(dataset_path=None, *, detection_only: bool = False):
     """
-    Write ``train_coco.json``, ``val_coco.json``, ``test_coco.json`` under
-    ``<dataset_root>/labels/``.
+    Write COCO split JSON files under ``<dataset_root>/labels/``.
+
+    Multi-class (default): ``train_coco.json``, ``val_coco.json``, ``test_coco.json``
+    with one category per ``class_label`` species.
+
+    Detection-only (``detection_only=True``): ``train_coco_det.json``, etc., with a
+    single ``mosquito`` class (same ``manual_labels.csv`` rows, boxes, and image splits;
+    species stored only in multi-class JSON). Does not overwrite the multi-class JSON files.
 
     :param dataset_path: Dataset root, or None to use ``MOSQUITOES_DATASET`` then Kaggle download.
+    :param detection_only: If True, export single-class COCO files with ``*_coco_det.json`` names.
     :return: Absolute dataset root (same layout as input).
     """
-    dataset_path = resolve_dataset_root(dataset_path)
-    print(f"Dataset root: {dataset_path}")
+    image_root, labels_dir = resolve_dataset_layout(dataset_path)
 
-    csv_path = resolve_labels_csv(dataset_path)
-    labels_dir = os.path.join(dataset_path, "labels")
-    os.makedirs(labels_dir, exist_ok=True)
+    df, csv_path = load_manual_labels_dataframe(image_root, labels_dir=labels_dir)
 
-    print(f"Reading labels from: {csv_path}")
-    df = pd.read_csv(csv_path)
-
-    available_files, duplicate_names = build_image_index(dataset_path)
-    if not available_files:
-        raise RuntimeError(f"No images found under dataset path: {dataset_path}")
-    if duplicate_names:
+    if detection_only:
+        categories = [{"id": 0, "name": "mosquito", "supercategory": "insect"}]
+        label_to_id: dict[str, int] = {}
+        use_class_labels = False
         print(
-            f"Warning: found duplicate image basenames; using first match for {len(duplicate_names)} files."
+            "Detection-only export: same manual_labels.csv rows and splits as multi-class; "
+            "category_id=0 for all boxes (species labels not written to COCO)."
         )
+    else:
+        categories, label_to_id, use_class_labels = build_category_layout(df)
 
-    print("Normalizing annotation filenames against available images...")
-    df["resolved_img_fName"] = df["img_fName"].apply(
-        lambda name: resolve_to_available_filename(name, available_files)
-    )
-    missing_rows = int(df["resolved_img_fName"].isna().sum())
-    if missing_rows:
-        print(f"Warning: dropping {missing_rows} annotation rows with missing images.")
-    df = df.dropna(subset=["resolved_img_fName"]).copy()
-    df["img_fName"] = df["resolved_img_fName"]
-    df = df.drop(columns=["resolved_img_fName"])
-    if df.empty:
-        raise RuntimeError("No valid annotation rows remain after filename resolution.")
-
-    if "class_label" in df.columns:
-        n_miss = int(df["class_label"].isna().sum())
-        if n_miss:
-            print(f"Warning: dropping {n_miss} rows with missing class_label.")
-        df = df.dropna(subset=["class_label"]).copy()
-        if df.empty:
-            raise RuntimeError("No rows left after dropping missing class_label.")
-
-    categories, label_to_id, use_class_labels = build_category_layout(df)
     print(
         f"COCO categories ({len(categories)}): "
         + ", ".join(str(c["name"]) for c in categories)
     )
     report_and_validate_multi_box_labels(df)
 
-    # --- THE SPLITTING LOGIC ---
-    print("Shuffling and splitting images (by image, not by box)...")
-    
-    # Get a list of all unique images
-    unique_images = df['img_fName'].unique().tolist()
-    
-    # Shuffle the list randomly (Seed 42 ensures we get the same shuffle if we run it twice)
-    random.seed(42)
-    random.shuffle(unique_images)
-    
-    total_imgs = len(unique_images)
-    if total_imgs < 3:
-        raise RuntimeError(
-            f"Need at least 3 valid images to create train/val/test splits, found {total_imgs}."
-        )
-
-    train_split_idx = int(total_imgs * 0.70)
-    val_split_idx = int(total_imgs * 0.85)  # 70% train + 15% val
-
-    train_split_idx = max(1, min(train_split_idx, total_imgs - 2))
-    val_split_idx = max(train_split_idx + 1, min(val_split_idx, total_imgs - 1))
-    
-    # Slice the list into three groups
-    train_imgs = set(unique_images[:train_split_idx])
-    val_imgs = set(unique_images[train_split_idx:val_split_idx])
-    test_imgs = set(unique_images[val_split_idx:])
-    
+    train_imgs, val_imgs, test_imgs = resolve_train_val_test_splits(
+        df, labels_dir, detection_only=detection_only
+    )
+    total_imgs = len(train_imgs) + len(val_imgs) + len(test_imgs)
     print(f"Total Images: {total_imgs}")
 
     # --- BUILD AND SAVE JSONS ---
@@ -356,15 +545,26 @@ def convert_and_split_csv(dataset_path=None):
         f" -> Testing: {len(test_imgs)} images, {len(test_coco['annotations'])} boxes"
     )
 
-    with open(os.path.join(labels_dir, 'train_coco.json'), 'w') as f:
-        json.dump(train_coco, f)
-    with open(os.path.join(labels_dir, 'val_coco.json'), 'w') as f:
-        json.dump(val_coco, f)
-    with open(os.path.join(labels_dir, 'test_coco.json'), 'w') as f:
-        json.dump(test_coco, f)
-        
-    print("Done! train_coco.json, val_coco.json, and test_coco.json have been created.")
-    return dataset_path
+    json_names = coco_split_json_names(detection_only)
+    for key, coco_dict in (
+        ("train", train_coco),
+        ("val", val_coco),
+        ("test", test_coco),
+    ):
+        out_path = os.path.join(labels_dir, json_names[key])
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(coco_dict, f)
+
+    written = ", ".join(json_names[k] for k in ("train", "val", "test"))
+    print(f"Done! Wrote {written}.")
+    if detection_only:
+        multi = coco_split_json_names(False)
+        print(
+            "Multi-class COCO files were not modified: "
+            + ", ".join(multi[k] for k in ("train", "val", "test")) + "."
+        )
+    print(f"Label CSV used for this export: {csv_path}")
+    return image_root
 
 
 if __name__ == "__main__":
@@ -383,5 +583,11 @@ if __name__ == "__main__":
         help="Dataset root (images). Labels: manual_labels.csv in repo or labels/. "
         "Default: MOSQUITOES_DATASET env, else Kaggle download.",
     )
+    ap.add_argument(
+        "--detection-only",
+        action="store_true",
+        help="Single-class COCO (*_coco_det.json) from the same manual_labels.csv and "
+        "train/val/test images as multi-class (reuses existing train_coco.json splits when present).",
+    )
     ns = ap.parse_args()
-    convert_and_split_csv(ns.dataset)
+    convert_and_split_csv(ns.dataset, detection_only=ns.detection_only)

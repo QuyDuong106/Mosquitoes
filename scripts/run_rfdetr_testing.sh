@@ -2,12 +2,14 @@
 #SBATCH --job-name=mosq-rfdetr-test
 #SBATCH --time=02:00:00
 #SBATCH --open-mode=truncate
-#SBATCH --output=logs/rfdetr-test-output.log
-#SBATCH --error=logs/rfdetr-test-error.log
+#SBATCH --output=logs/rfdetr-end-to-end-test-output.log
+#SBATCH --error=logs/rfdetr-end-to-end-test-error.log
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
 #
-# Evaluate RF-DETR on the test split (see test_rfdetr_model.py).
+# End-to-end (multi-class): evaluate RF-DETR on the test split (see test_rfdetr_model.py).
+# Logs: logs/rfdetr-end-to-end-test-{output,error}.log
+# Predictions: test_predictions-end-to-end.json (under SLURM submit dir)
 # No Kaggle env needed: uses ./rfdetr_dataset/test (or --test-dir) and ./output weights.
 # After retraining or changing COCO splits, ensure rfdetr_dataset/ matches that run
 # (train_rfdetr_model.py rebuilds it). num_classes / class names come from _annotations.coco.json.
@@ -25,7 +27,7 @@
 #     # From elsewhere: sbatch --chdir=/path/to/Mosquitoes /path/to/Mosquitoes/run_rfdetr_testing.sh
 #     # Extra CLI args: sbatch --wrap 'cd /path/to/Mosquitoes && ./run_rfdetr_testing.sh --max-images 200'
 #
-# Under Slurm, predictions JSON is written to ${SLURM_SUBMIT_DIR}/test_predictions.json by
+# Under Slurm, predictions JSON is written to ${SLURM_SUBMIT_DIR}/test_predictions-end-to-end.json by
 # default (sbatch submit directory). Pass --save-predictions /other/path.json to override
 # (your path wins because it is passed last).
 #
@@ -70,7 +72,7 @@ fi
 # Slurm: pin predictions output to submit directory (same as post-cd cwd).
 SLURM_PRED_ARGS=()
 if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
-  SLURM_PRED_ARGS=(--save-predictions "${SLURM_SUBMIT_DIR}/test_predictions.json")
+  SLURM_PRED_ARGS=(--save-predictions "${SLURM_SUBMIT_DIR}/test_predictions-end-to-end.json")
 fi
 
 exec "${PYTHON_BIN}" "${SCRIPTS_DIR}/test_rfdetr_model.py" "${SLURM_PRED_ARGS[@]}" "$@"
