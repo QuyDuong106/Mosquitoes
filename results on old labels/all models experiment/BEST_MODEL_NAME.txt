@@ -1,0 +1,1 @@
+resnet50_weighted_loss_lr0.0003_bs32_ep30_g1.0_wsqrt_inverse
